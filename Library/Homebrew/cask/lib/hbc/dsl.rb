@@ -81,6 +81,7 @@ module Hbc
     attr_reader :token
     def initialize(token)
       @token = token
+      @languages = {}
     end
 
     def name(*args)
@@ -99,44 +100,15 @@ module Hbc
       @homepage ||= homepage
     end
 
-    def language(*args, &block)
-      if !args.empty? && block_given?
-        @language_blocks ||= {}
-        @language_blocks[args] = block
-      else
-        language_eval
-        @language
-      end
+    def language(pattern = nil, options = {}, &block)
+      return language_config[:name] unless pattern
+
+      set_default_language(pattern, options, &block)
+      @languages[pattern] = { pattern: pattern, name: options.fetch(:name, pattern), block: block }
     end
 
     def language_eval
-      return if instance_variable_defined?(:@language)
-
-      return unless instance_variable_defined?(:@language_blocks)
-
-      default_key = @language_blocks.keys.detect { |key| key.include?(:default) }
-
-      MacOS.languages.each do |language|
-        @language_blocks.each do |regexes_or_strings, block|
-          if regexes_or_strings.include?(:default)
-            regexes_or_strings = regexes_or_strings - [:default] + [%r{^en}]
-          end
-
-          regexes_or_strings.each do |regex_or_string|
-            if regex_or_string.class == language.class
-              next unless regex_or_string == language
-            else
-              next unless regex_or_string =~ language
-            end
-
-            @language = block.call
-            return
-          end
-        end
-      end
-
-      # fallback to :default
-      @language = default_key.nil? ? nil : @language_blocks[default_key].call
+      language_config[:block].call
     end
 
     def url(*args, &block)
@@ -327,6 +299,29 @@ module Hbc
 
     def self.appdir
       Hbc.appdir.sub(%r{\/$}, "")
+    end
+
+    private
+
+    def set_default_language(pattern, options, &block)
+      return unless options[:default]
+
+      raise Hbc::CaskInvalidError.new(token, "Only one default language may be defined") if @languages[:default]
+
+      @languages[:default] = { pattern: pattern, name: options.fetch(:name, pattern), block: block }
+    end
+
+    def language_config
+      @language_config ||= matching_language
+    end
+
+    def matching_language
+      MacOS.languages.each do |lang|
+        match = @languages.keys.find { |pattern| lang =~ /^#{pattern}/ }
+        return @languages[match] if match
+      end
+
+      @languages.fetch(:default, { name: "en-US", block: ->{} })
     end
   end
 end
